@@ -4,6 +4,7 @@ import string
 import asyncio
 import aiohttp
 from pyrogram import Client, filters
+from pyrogram.enums import ParseMode
 
 # ================= إعدادات البوت ================= #
 API_ID = 28797361
@@ -13,11 +14,13 @@ BOT_TOKEN = "8929101359:AAHA4pDryGlKK2-uV_vgG7lSnae27P21usA"
 ADMINS = [729501226, 936283959, 445421092]
 LOG_CHANNEL = -1003840202910
 
+# تفعيل الماركداون افتراضياً في كامل البوت لتعمل الأسماء الزرقاء بشكل صحيح
 app_bot = Client(
     "whisper_bot",
     api_id=API_ID,
     api_hash=API_HASH,
-    bot_token=BOT_TOKEN
+    bot_token=BOT_TOKEN,
+    parse_mode=ParseMode.MARKDOWN
 )
 
 db_lock = asyncio.Lock()
@@ -165,12 +168,10 @@ async def group_whisper_trigger(client, message):
     receiver_mention = get_mention(receiver.first_name, receiver.id)
     text = f"• تم تحديد الهمسه لـ ↤︎ {receiver_mention}\n• اضغط الزر لكتابة الهمسة \n-"
     
-    # بناء الزر الملون للطلب المباشر (Raw API) باللون الأحمر (danger)
     inline_keyboard = [
         [{"text": "اهمس هنا", "url": deep_link, "style": "danger"}]
     ]
     
-    # إرسال الرسالة عبر دالة الألوان المخصصة
     await send_colored_keyboard(message.chat.id, text, inline_keyboard, message.id)
 
 
@@ -243,6 +244,7 @@ async def process_whisper_text(client, message):
     target_mention = get_mention(pending['target_name'], pending['target_id'])
     sender_mention = get_mention(sender.first_name, sender.id)
 
+    # رد للمستخدم في الخاص (بدون محتوى الهمسة)
     await message.reply_text(f"تم ارسال همستك لـ {target_mention} بنجاح")
     
     bot_info = await client.get_me()
@@ -250,28 +252,27 @@ async def process_whisper_text(client, message):
     
     group_text = f"↢ الهمسه لـ ↤︎ {target_mention}\n↢ من ↤︎ {sender_mention}\n-"
     
-    # بناء الأزرار الملونة (Raw API) للقروب
     inline_keyboard = [
         [{"text": "رؤيه الهمسة ✉️", "callback_data": f"read_{wid}", "style": "primary"}],
         [{"text": f"اهمس لـ {clean_name(sender.first_name)}", "url": reply_deep_link}]
     ]
     
-    # الإرسال للقروب باستخدام الدالة الملونة
     await send_colored_keyboard(pending['group_id'], group_text, inline_keyboard)
     
-    # سجل القناة
-    log_text = (f"همسه جديده 🕵️✉️\n"
-                f"المرسل \n: {sender_mention}\n"
-                f"المستلم : {target_mention}\n"
-                f":محتوى الهمسة\n{text}")
+    # سجل القناة (بالتنسيق المطلوب بالضبط)
+    log_text = (
+        f"همسه جديده 🕵️✉️\n"
+        f"المرسل \n: {sender_mention}\n"
+        f"المستلم : {target_mention}\n"
+        f":محتوى الهمسة\n{text}"
+    )
     try:
         await client.send_message(LOG_CHANNEL, log_text, disable_web_page_preview=True)
     except Exception as e:
-        pass
+        print(f"Channel Log Error: {e}")
 
 
 # ================= 4. قراءة الهمسة (نظام الحماية) ================= #
-# هنا نستخدم Pyrogram بشكل طبيعي لأن الرد المنبثق (Alert) لا يحتاج ألوان
 @app_bot.on_callback_query(filters.regex(r"^read_"))
 async def read_whisper_callback(client, call):
     wid = call.data.split("read_")[1]
