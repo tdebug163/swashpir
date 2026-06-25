@@ -191,7 +191,9 @@ async def start_handler(client, message):
                 await message.reply_text("↢ انت لم تكتب اهمس بالقروب")
                 return
 
-            await delete_request(req_id)
+            # تم حل المشكلة: إزالة الحذف من هنا ليتمكن المستخدم من نقر الزر أكثر من مرة
+            # await delete_request(req_id) 
+
             receiver_mention = get_mention(req['receiver_name'], req['receiver_id'])
             msg = await message.reply_text(f"↢ اكتب همستك لـ {receiver_mention}  .")
 
@@ -270,7 +272,7 @@ async def process_whisper_text(client, message):
         "parse_mode": "Markdown",
         "disable_web_page_preview": True
     }
-    
+
     # إرسال طلب HTTP مباشر لسيرفرات تلجرام بدون المرور بمكتبة Pyrogram
     try:
         async with aiohttp.ClientSession() as session:
