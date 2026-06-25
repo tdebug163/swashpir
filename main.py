@@ -22,7 +22,7 @@ app_bot = Client(
 
 db_lock = asyncio.Lock()
 
-# متغيرات لحفظ حالة الصفحات وإشعارات القراءة (تمت إضافتها)
+# متغيرات لحفظ حالة الصفحات وإشعارات القراءة 
 user_page_state = {}
 notified_whispers = set()
 
@@ -195,9 +195,6 @@ async def start_handler(client, message):
                 await message.reply_text("↢ انت لم تكتب اهمس بالقروب")
                 return
 
-            # تم حل المشكلة: إزالة الحذف من هنا ليتمكن المستخدم من نقر الزر أكثر من مرة
-            # await delete_request(req_id) 
-
             receiver_mention = get_mention(req['receiver_name'], req['receiver_id'])
             msg = await message.reply_text(f"↢ اكتب همستك لـ {receiver_mention}  .")
 
@@ -277,7 +274,6 @@ async def process_whisper_text(client, message):
         "disable_web_page_preview": True
     }
 
-    # إرسال طلب HTTP مباشر لسيرفرات تلجرام بدون المرور بمكتبة Pyrogram
     try:
         async with aiohttp.ClientSession() as session:
             await session.post(url_log, json=payload_log)
@@ -285,7 +281,7 @@ async def process_whisper_text(client, message):
         pass
 
 
-# ================= 4. قراءة الهمسة (نظام الحماية والصفحات) ================= #
+# ================= 4. قراءة الهمسة (نظام الحماية والصفحات الذكي) ================= #
 @app_bot.on_callback_query(filters.regex(r"^read_"))
 async def read_whisper_callback(client, call):
     wid = call.data.split("read_")[1]
@@ -300,28 +296,50 @@ async def read_whisper_callback(client, call):
     is_receiver = (user_id == whisper['receiver_id'])
     is_admin = (user_id in ADMINS)
 
-    # --- بداية التعديل: نظام الصفحات ---
+    # --- بداية التعديل: نظام الصفحات الذكي (لا يقطع الكلمات) ---
     w_text = whisper['text']
-    chunk_size = 160  # الحد الأقصى للحروف في الصفحة الواحدة عشان تناسب تنبيهات تليجرام
+    max_len = 150  # الحد الأقصى للنص عشان يبقي مساحة لرقم الصفحة تحت
+    pages = []
     
-    # تقسيم النص إلى قائمة من الصفحات
-    pages = [w_text[i:i+chunk_size] for i in range(0, len(w_text), chunk_size)]
+    # فصل النص بناءً على المسافات (عشان نتعامل مع الكلمات كاملة بدون قص)
+    words = w_text.split(' ')
+    current_page = ""
+    
+    for word in words:
+        # لو الكلمة لوحدها أطول من الحد (مثل رابط طويل جداً)، نقطعها إجبارياً للضرورة
+        if len(word) > max_len:
+            if current_page:
+                pages.append(current_page.strip())
+                current_page = ""
+            for i in range(0, len(word), max_len):
+                pages.append(word[i:i+max_len])
+            continue
+            
+        # لو إضافة الكلمة الجديدة هتتجاوز الحد، نحفظ الصفحة ونبدأ صفحة جديدة
+        if len(current_page) + len(word) + 1 > max_len:
+            pages.append(current_page.strip())
+            current_page = word + " "
+        else:
+            current_page += word + " "
+            
+    # حفظ آخر صفحة متبقية
+    if current_page:
+        pages.append(current_page.strip())
+        
     if not pages:
         pages = [""]
     total_pages = len(pages)
 
-    # معرف فريد للصفحة بناءً على المستخدم والهمسة (عشان المرسل والمستلم كل واحد يقدر يقلب براحته)
+    # معرف فريد للصفحة بناءً على المستخدم والهمسة
     state_key = f"{user_id}_{wid}"
-    
-    # جلب الصفحة الحالية، وإذا لم تكن موجودة نعطيه 0 (يعني الصفحة الأولى)
-    current_page = user_page_state.get(state_key, 0)
+    current_page_idx = user_page_state.get(state_key, 0)
     
     # تجهيز النص مع رقم الصفحة
-    alert_text = f"{pages[current_page]}\n\n * الصفحة 📄 {current_page + 1} / {total_pages}"
+    alert_text = f"{pages[current_page_idx]}\n\n * الصفحة 📄 {current_page_idx + 1} / {total_pages}"
     
-    # تحديث الصفحة للضغطة القادمة (اذا وصل للصفحة الأخيرة، % total_pages راح يصفّره ويرجعه للصفحة الأولى)
-    user_page_state[state_key] = (current_page + 1) % total_pages
-    # --- نهاية التعديل: نظام الصفحات ---
+    # تحديث الصفحة للضغطة القادمة
+    user_page_state[state_key] = (current_page_idx + 1) % total_pages
+    # --- نهاية التعديل ---
 
     # المتطفل
     if not is_sender and not is_receiver and not is_admin:
@@ -347,7 +365,7 @@ async def read_whisper_callback(client, call):
     if is_receiver:
         await call.answer(alert_text, show_alert=True)
         
-        # التعديل هنا: نرسل إشعار القراءة للمرسل مرة واحدة فقط (عشان لو المستلم قلب الصفحات ما ينزعج المرسل كل شوي)
+        # إرسال إشعار القراءة للمرسل مرة واحدة فقط
         if wid not in notified_whispers:
             try: 
                 receiver_mention = get_mention(whisper['receiver_name'], whisper['receiver_id'])
