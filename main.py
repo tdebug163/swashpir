@@ -6,7 +6,7 @@ import string
 import threading
 
 # ================= إعدادات البوت ================= #
-TOKEN = "8929101359:AAElDLozajeT7RaUTzqQ5QcymrJjHCfCFiI"
+TOKEN = "8929101359:AAH0JYPCVRf66No2qIEP4o5_Yr8OEs0-XgI"
 bot = telebot.TeleBot(TOKEN, parse_mode=None)
 
 ADMINS = [729501226, 936283959, 445421092]
