@@ -3,6 +3,7 @@ import random
 import string
 import asyncio
 import aiohttp
+import html
 from pyrogram import Client, filters
 from pyrogram.enums import ParseMode
 
@@ -260,21 +261,24 @@ async def process_whisper_text(client, message):
     # الإرسال للقروب باستخدام الدالة الملونة
     await send_colored_keyboard(pending['group_id'], group_text, inline_keyboard)
 
-    # سجل القناة (تم الإصلاح لضمان الإرسال للقناة فقط وبشكل صحيح)
-    # نقوم بعمل Replace للرموز لحماية الماركداون حتى لا تفشل الرسالة وتصل للقناة بنجاح
-    safe_text = text.replace('_', '\\_').replace('*', '\\*').replace('`', '\\`').replace('[', '\\[')
-    
+    # ================= التعديل هنا: إرسال الهمسة للقناة بصيغة HTML لضمان عدم الفشل =================
+    # نستخدم html.escape لضمان أن الأسماء المزخرفة والمحتوى الغريب لا يكسر الكود نهائياً
+    sender_name_safe = html.escape(sender.first_name if sender.first_name else "مستخدم")
+    target_name_safe = html.escape(pending['target_name'] if pending['target_name'] else "مستخدم")
+    text_safe = html.escape(text)
+
     log_text = (f"همسه جديده 🕵️✉️\n"
-                f"المرسل \n: {sender_mention}\n"
-                f"المستلم : {target_mention}\n"
+                f"المرسل \n: <a href=\"tg://user?id={sender.id}\">{sender_name_safe}</a>\n"
+                f"المستلم : <a href=\"tg://user?id={pending['target_id']}\">{target_name_safe}</a>\n"
                 f":محتوى الهمسة\n"
-                f"{safe_text}")
+                f"{text_safe}")
+    
     try:
         await client.send_message(
             chat_id=LOG_CHANNEL, 
             text=log_text, 
             disable_web_page_preview=True,
-            parse_mode=ParseMode.MARKDOWN
+            parse_mode=ParseMode.HTML
         )
     except Exception as e:
         print(f"Error Log: {e}")
