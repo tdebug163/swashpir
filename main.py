@@ -2,11 +2,12 @@ import sqlite3
 import random
 import string
 import asyncio
+import aiosqlite
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ================= إعدادات البوت ================= #
-API_ID = 28797361 # ضع الآيبي آيدي الخاص بك هنا
+API_ID = 28797361  # ضع الآيبي آيدي الخاص بك هنا
 API_HASH = "771041b32e83ab232e066b7adeee700b" 
 BOT_TOKEN = "8929101359:AAHA4pDryGlKK2-uV_vgG7lSnae27P21usA"
 
@@ -20,9 +21,7 @@ app_bot = Client(
     bot_token=BOT_TOKEN
 )
 
-db_lock = asyncio.Lock()
-
-# ================= إعداد قاعدة البيانات ================= #
+# ================= إعداد قاعدة البيانات (تهيئة أولية) ================= #
 def init_db():
     conn = sqlite3.connect('whispers.db')
     c = conn.cursor()
@@ -47,78 +46,54 @@ def clean_name(name):
 def get_mention(name, user_id):
     return f"[{clean_name(name)}](tg://user?id={user_id})"
 
-# ================= دوال التحكم بالقاعدة (Async) ================= #
+# ================= دوال التحكم بالقاعدة (Async و فائقة السرعة) ================= #
 async def add_request(group_id, sender_id, receiver_id, receiver_name):
     req_id = generate_id()
-    async with db_lock:
-        conn = sqlite3.connect('whispers.db')
-        c = conn.cursor()
-        c.execute("INSERT INTO requests VALUES (?, ?, ?, ?, ?)", (req_id, group_id, sender_id, receiver_id, receiver_name))
-        conn.commit()
-        conn.close()
+    async with aiosqlite.connect('whispers.db') as db:
+        await db.execute("INSERT INTO requests VALUES (?, ?, ?, ?, ?)", (req_id, group_id, sender_id, receiver_id, receiver_name))
+        await db.commit()
     return req_id
 
 async def get_request(req_id):
-    async with db_lock:
-        conn = sqlite3.connect('whispers.db')
-        c = conn.cursor()
-        c.execute("SELECT * FROM requests WHERE req_id=?", (req_id,))
-        res = c.fetchone()
-        conn.close()
+    async with aiosqlite.connect('whispers.db') as db:
+        async with db.execute("SELECT * FROM requests WHERE req_id=?", (req_id,)) as cursor:
+            res = await cursor.fetchone()
     if res:
         return {"req_id": res[0], "group_id": res[1], "sender_id": res[2], "receiver_id": res[3], "receiver_name": res[4]}
     return None
 
 async def delete_request(req_id):
-    async with db_lock:
-        conn = sqlite3.connect('whispers.db')
-        c = conn.cursor()
-        c.execute("DELETE FROM requests WHERE req_id=?", (req_id,))
-        conn.commit()
-        conn.close()
+    async with aiosqlite.connect('whispers.db') as db:
+        await db.execute("DELETE FROM requests WHERE req_id=?", (req_id,))
+        await db.commit()
 
 async def set_pending(user_id, group_id, target_id, target_name, prompt_msg_id):
-    async with db_lock:
-        conn = sqlite3.connect('whispers.db')
-        c = conn.cursor()
-        c.execute("REPLACE INTO pending VALUES (?, ?, ?, ?, ?)", (user_id, group_id, target_id, target_name, prompt_msg_id))
-        conn.commit()
-        conn.close()
+    async with aiosqlite.connect('whispers.db') as db:
+        await db.execute("REPLACE INTO pending VALUES (?, ?, ?, ?, ?)", (user_id, group_id, target_id, target_name, prompt_msg_id))
+        await db.commit()
 
 async def get_pending(user_id):
-    async with db_lock:
-        conn = sqlite3.connect('whispers.db')
-        c = conn.cursor()
-        c.execute("SELECT * FROM pending WHERE user_id=?", (user_id,))
-        res = c.fetchone()
-        conn.close()
+    async with aiosqlite.connect('whispers.db') as db:
+        async with db.execute("SELECT * FROM pending WHERE user_id=?", (user_id,)) as cursor:
+            res = await cursor.fetchone()
     if res:
         return {"user_id": res[0], "group_id": res[1], "target_id": res[2], "target_name": res[3], "prompt_msg_id": res[4]}
     return None
 
 async def delete_pending(user_id):
-    async with db_lock:
-        conn = sqlite3.connect('whispers.db')
-        c = conn.cursor()
-        c.execute("DELETE FROM pending WHERE user_id=?", (user_id,))
-        conn.commit()
-        conn.close()
+    async with aiosqlite.connect('whispers.db') as db:
+        await db.execute("DELETE FROM pending WHERE user_id=?", (user_id,))
+        await db.commit()
 
 async def add_whisper(wid, group_id, sender_id, receiver_id, text, sender_name, receiver_name):
-    async with db_lock:
-        conn = sqlite3.connect('whispers.db')
-        c = conn.cursor()
-        c.execute("INSERT INTO whispers VALUES (?, ?, ?, ?, ?, ?, ?)", (wid, group_id, sender_id, receiver_id, text, sender_name, receiver_name))
-        conn.commit()
-        conn.close()
+    async with aiosqlite.connect('whispers.db') as db:
+        await db.execute("INSERT INTO whispers VALUES (?, ?, ?, ?, ?, ?, ?)", (wid, group_id, sender_id, receiver_id, text, sender_name, receiver_name))
+        await db.commit()
 
 async def get_whisper(wid):
-    async with db_lock:
-        conn = sqlite3.connect('whispers.db')
-        c = conn.cursor()
-        c.execute("SELECT * FROM whispers WHERE wid=?", (wid,))
-        res = c.fetchone()
-        conn.close()
+    async with aiosqlite.connect('whispers.db') as db:
+        async with db.execute("SELECT * FROM whispers WHERE wid=?", (wid,)) as cursor:
+            res = await cursor.fetchone()
     if res:
         return {"wid": res[0], "group_id": res[1], "sender_id": res[2], "receiver_id": res[3], "text": res[4], "sender_name": res[5], "receiver_name": res[6]}
     return None
@@ -142,7 +117,10 @@ async def group_whisper_trigger(client, message):
     bot_info = await client.get_me()
     deep_link = f"http://t.me/{bot_info.username}?start=req_{req_id}"
     
-    markup = InlineKeyboardMarkup([[InlineKeyboardButton("اهمس هنا", url=deep_link)]])
+    # 🔴 إضافة اللون الأحمر (danger) للزر
+    markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("اهمس هنا", url=deep_link, style="danger")]
+    ])
     
     receiver_mention = get_mention(receiver.first_name, receiver.id)
     text = f"• تم تحديد الهمسه لـ ↤︎ {receiver_mention}\n• اضغط الزر لكتابة الهمسة \n-"
@@ -198,13 +176,11 @@ async def process_whisper_text(client, message):
     if not pending:
         return 
         
-    # حذف رسالة المستخدم التي تحتوي على الهمسة
     try:
         await message.delete()
     except:
         pass
         
-    # حذف رسالة البوت (اكتب همستك لـ...)
     if pending['prompt_msg_id']:
         try:
             await client.delete_messages(message.chat.id, pending['prompt_msg_id'])
@@ -226,8 +202,9 @@ async def process_whisper_text(client, message):
     bot_info = await client.get_me()
     reply_deep_link = f"http://t.me/{bot_info.username}?start=rep_{wid}"
     
+    # 🔵 إضافة اللون الأزرق (primary) للزر
     markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("رؤيه الهمسة ✉️", callback_data=f"read_{wid}")],
+        [InlineKeyboardButton("رؤيه الهمسة ✉️", callback_data=f"read_{wid}", style="primary")],
         [InlineKeyboardButton(f"اهمس لـ {clean_name(sender.first_name)}", url=reply_deep_link)]
     ])
     
@@ -245,7 +222,7 @@ async def process_whisper_text(client, message):
         print(f"Log Error: {e}")
 
 
-# ================= 4. قراءة الهمسة (نظام الحماية والأدمن) ================= #
+# ================= 4. قراءة الهمسة (نظام الحماية) ================= #
 @app_bot.on_callback_query(filters.regex(r"^read_"))
 async def read_whisper_callback(client, call):
     wid = call.data.split("read_")[1]
@@ -265,7 +242,6 @@ async def read_whisper_callback(client, call):
         w_text = w_text[:167] + "..."
     alert_text = f"{w_text}\n * الصفحة 📄 1 / 1"
 
-    # المتطفل
     if not is_sender and not is_receiver and not is_admin:
         await call.answer("●الهمسة لا تخصك", show_alert=True)
         try: 
@@ -275,17 +251,14 @@ async def read_whisper_callback(client, call):
             pass
         return
 
-    # الأدمن الشبح
     if is_admin and not is_sender and not is_receiver:
         await call.answer(alert_text, show_alert=True)
         return
 
-    # المرسل يقرأ
     if is_sender:
         await call.answer(alert_text, show_alert=True)
         return
 
-    # المستلم يقرأ
     if is_receiver:
         await call.answer(alert_text, show_alert=True)
         try: 
@@ -295,8 +268,7 @@ async def read_whisper_callback(client, call):
             pass
         return
 
-
 # ================= التشغيل ================= #
 if __name__ == "__main__":
-    print("Starting Pyrogram Whisper Bot...")
+    print("Starting Fast Pyrogram Whisper Bot...")
     app_bot.run()
