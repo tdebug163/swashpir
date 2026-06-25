@@ -14,13 +14,11 @@ BOT_TOKEN = "8929101359:AAHA4pDryGlKK2-uV_vgG7lSnae27P21usA"
 ADMINS = [729501226, 936283959, 445421092]
 LOG_CHANNEL = -1003840202910
 
-# تفعيل الماركداون افتراضياً في كامل البوت لتعمل الأسماء الزرقاء بشكل صحيح
 app_bot = Client(
     "whisper_bot",
     api_id=API_ID,
     api_hash=API_HASH,
-    bot_token=BOT_TOKEN,
-    parse_mode=ParseMode.MARKDOWN
+    bot_token=BOT_TOKEN
 )
 
 db_lock = asyncio.Lock()
@@ -157,21 +155,23 @@ whisper_cmd = filters.create(whisper_filter)
 async def group_whisper_trigger(client, message):
     sender = message.from_user
     receiver = message.reply_to_message.from_user
-    
+
     if not receiver or receiver.is_bot or sender.id == receiver.id:
         return
 
     req_id = await add_request(message.chat.id, sender.id, receiver.id, receiver.first_name)
     bot_info = await client.get_me()
     deep_link = f"http://t.me/{bot_info.username}?start=req_{req_id}"
-    
+
     receiver_mention = get_mention(receiver.first_name, receiver.id)
     text = f"• تم تحديد الهمسه لـ ↤︎ {receiver_mention}\n• اضغط الزر لكتابة الهمسة \n-"
-    
+
+    # بناء الزر الملون للطلب المباشر (Raw API) باللون الأحمر (danger)
     inline_keyboard = [
         [{"text": "اهمس هنا", "url": deep_link, "style": "danger"}]
     ]
-    
+
+    # إرسال الرسالة عبر دالة الألوان المخصصة
     await send_colored_keyboard(message.chat.id, text, inline_keyboard, message.id)
 
 
@@ -180,37 +180,37 @@ async def group_whisper_trigger(client, message):
 async def start_handler(client, message):
     if len(message.command) > 1:
         payload = message.command[1]
-        
+
         # [أ] بدء همسة جديدة
         if payload.startswith("req_"):
             req_id = payload.split("req_")[1]
             req = await get_request(req_id)
-            
+
             if not req:
                 await message.reply_text("↢ هذه الهمسة قديمة او تم إرسالها مسبقاً.")
                 return
             if message.from_user.id != req['sender_id']:
                 await message.reply_text("↢ انت لم تكتب اهمس بالقروب")
                 return
-            
+
             await delete_request(req_id)
             receiver_mention = get_mention(req['receiver_name'], req['receiver_id'])
             msg = await message.reply_text(f"↢ اكتب همستك لـ {receiver_mention}  .")
-            
+
             await set_pending(message.from_user.id, req['group_id'], req['receiver_id'], req['receiver_name'], msg.id)
-            
+
         # [ب] الرد على همسة موجودة
         elif payload.startswith("rep_"):
             wid = payload.split("rep_")[1]
             whisper = await get_whisper(wid)
-            
+
             if not whisper:
                 await message.reply_text("↢ الهمسة غير موجودة.")
                 return
             if message.from_user.id != whisper['receiver_id']:
                 await message.reply_text("↢ هذه الهمسة لا تخصك للرد عليها.")
                 return
-            
+
             sender_mention = get_mention(whisper['sender_name'], whisper['sender_id'])
             msg = await message.reply_text(f"↢ اكتب همستك لـ {sender_mention}  .")
             await set_pending(message.from_user.id, whisper['group_id'], whisper['sender_id'], whisper['sender_name'], msg.id)
@@ -222,12 +222,12 @@ async def process_whisper_text(client, message):
     pending = await get_pending(message.from_user.id)
     if not pending:
         return 
-        
+
     try:
         await message.delete()
     except:
         pass
-        
+
     if pending['prompt_msg_id']:
         try:
             await client.delete_messages(message.chat.id, pending['prompt_msg_id'])
@@ -237,47 +237,56 @@ async def process_whisper_text(client, message):
     text = message.text
     sender = message.from_user
     wid = generate_id()
-    
+
     await add_whisper(wid, pending['group_id'], sender.id, pending['target_id'], text, sender.first_name, pending['target_name'])
     await delete_pending(sender.id)
-    
+
     target_mention = get_mention(pending['target_name'], pending['target_id'])
     sender_mention = get_mention(sender.first_name, sender.id)
 
-    # رد للمستخدم في الخاص (بدون محتوى الهمسة)
     await message.reply_text(f"تم ارسال همستك لـ {target_mention} بنجاح")
-    
+
     bot_info = await client.get_me()
     reply_deep_link = f"http://t.me/{bot_info.username}?start=rep_{wid}"
-    
+
     group_text = f"↢ الهمسه لـ ↤︎ {target_mention}\n↢ من ↤︎ {sender_mention}\n-"
-    
+
+    # بناء الأزرار الملونة (Raw API) للقروب
     inline_keyboard = [
         [{"text": "رؤيه الهمسة ✉️", "callback_data": f"read_{wid}", "style": "primary"}],
         [{"text": f"اهمس لـ {clean_name(sender.first_name)}", "url": reply_deep_link}]
     ]
-    
+
+    # الإرسال للقروب باستخدام الدالة الملونة
     await send_colored_keyboard(pending['group_id'], group_text, inline_keyboard)
+
+    # سجل القناة (تم الإصلاح لضمان الإرسال للقناة فقط وبشكل صحيح)
+    # نقوم بعمل Replace للرموز لحماية الماركداون حتى لا تفشل الرسالة وتصل للقناة بنجاح
+    safe_text = text.replace('_', '\\_').replace('*', '\\*').replace('`', '\\`').replace('[', '\\[')
     
-    # سجل القناة (بالتنسيق المطلوب بالضبط)
-    log_text = (
-        f"همسه جديده 🕵️✉️\n"
-        f"المرسل \n: {sender_mention}\n"
-        f"المستلم : {target_mention}\n"
-        f":محتوى الهمسة\n{text}"
-    )
+    log_text = (f"همسه جديده 🕵️✉️\n"
+                f"المرسل \n: {sender_mention}\n"
+                f"المستلم : {target_mention}\n"
+                f":محتوى الهمسة\n"
+                f"{safe_text}")
     try:
-        await client.send_message(LOG_CHANNEL, log_text, disable_web_page_preview=True)
+        await client.send_message(
+            chat_id=LOG_CHANNEL, 
+            text=log_text, 
+            disable_web_page_preview=True,
+            parse_mode=ParseMode.MARKDOWN
+        )
     except Exception as e:
-        print(f"Channel Log Error: {e}")
+        print(f"Error Log: {e}")
 
 
 # ================= 4. قراءة الهمسة (نظام الحماية) ================= #
+# هنا نستخدم Pyrogram بشكل طبيعي لأن الرد المنبثق (Alert) لا يحتاج ألوان
 @app_bot.on_callback_query(filters.regex(r"^read_"))
 async def read_whisper_callback(client, call):
     wid = call.data.split("read_")[1]
     whisper = await get_whisper(wid)
-    
+
     if not whisper:
         await call.answer("● الهمسة غير موجودة أو تم حذفها.", show_alert=True)
         return
@@ -286,7 +295,7 @@ async def read_whisper_callback(client, call):
     is_sender = (user_id == whisper['sender_id'])
     is_receiver = (user_id == whisper['receiver_id'])
     is_admin = (user_id in ADMINS)
-    
+
     w_text = whisper['text']
     if len(w_text) > 170:
         w_text = w_text[:167] + "..."
