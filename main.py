@@ -25,7 +25,7 @@ db_lock = asyncio.Lock()
 # متغيرات لحفظ حالة الصفحات وإشعارات القراءة وحالة الأدمن
 user_page_state = {}
 notified_whispers = set()
-admin_states = {} # تم إضافتها لحفظ حالة الأدمن عند طلب صورة المطور
+admin_states = {} 
 
 # ================= دالة سريعة لإرسال الأزرار الملونة (Raw API) ================= #
 async def send_colored_keyboard(chat_id, text, inline_keyboard, reply_to_msg_id=None):
@@ -56,7 +56,6 @@ def init_db():
                  (user_id INTEGER PRIMARY KEY, group_id INTEGER, target_id INTEGER, target_name TEXT, prompt_msg_id INTEGER)''')
     c.execute('''CREATE TABLE IF NOT EXISTS whispers 
                  (wid TEXT PRIMARY KEY, group_id INTEGER, sender_id INTEGER, receiver_id INTEGER, text TEXT, sender_name TEXT, receiver_name TEXT)''')
-    # إضافة جدول جديد لحفظ إعدادات البوت مثل صورة المطور
     c.execute('''CREATE TABLE IF NOT EXISTS settings 
                  (key TEXT PRIMARY KEY, value TEXT)''')
     conn.commit()
@@ -276,7 +275,6 @@ async def process_whisper_text(client, message):
 
     group_text = f"↢ الهمسه لـ ↤︎ {target_mention}\n↢ من ↤︎ {sender_mention}\n-"
 
-    # بناء الأزرار الملونة للقروب (Raw API)
     inline_keyboard = [
         [{"text": "رؤيه الهمسة ✉️", "callback_data": f"read_{wid}", "style": "primary"}],
         [{"text": f"اهمس لـ {clean_name(sender.first_name)}", "url": reply_deep_link}]
@@ -284,7 +282,6 @@ async def process_whisper_text(client, message):
 
     await send_colored_keyboard(pending['group_id'], group_text, inline_keyboard)
 
-    # ================= الإرسال للقناة غصب (RAW API) =================
     log_text = (f"همسه جديده 🕵️✉️\n"
                 f"المرسل \n: {sender_mention}\n"
                 f"المستلم : {target_mention}\n"
@@ -305,7 +302,7 @@ async def process_whisper_text(client, message):
         pass
 
 
-# ================= 4. قراءة الهمسة (نظام الحماية والصفحات الذكي) ================= #
+# ================= 4. قراءة الهمسة (تم حل مشكلة اختفاء النص) ================= #
 @app_bot.on_callback_query(filters.regex(r"^read_"))
 async def read_whisper_callback(client, call):
     wid = call.data.split("read_")[1]
@@ -320,46 +317,36 @@ async def read_whisper_callback(client, call):
     is_receiver = (user_id == whisper['receiver_id'])
     is_admin = (user_id in ADMINS)
 
-    # --- بداية التعديل: نظام الصفحات الذكي (لا يقطع الكلمات) ---
+    # --- بداية التعديل: نظام الصفحات الذكي المتقدم لتفادي قص التليجرام ---
     w_text = whisper['text']
-    max_len = 150  # الحد الأقصى للنص عشان يبقي مساحة لرقم الصفحة تحت
+    max_len = 130  # تم تقليل الحد لتفادي مشكلة القص في شاشات الجوال
     pages = []
     
-    # فصل النص بناءً على المسافات (عشان نتعامل مع الكلمات كاملة بدون قص)
-    words = w_text.split(' ')
-    current_page = ""
-    
-    for word in words:
-        # لو الكلمة لوحدها أطول من الحد (مثل رابط طويل جداً)، نقطعها إجبارياً للضرورة
-        if len(word) > max_len:
-            if current_page:
-                pages.append(current_page.strip())
-                current_page = ""
-            for i in range(0, len(word), max_len):
-                pages.append(word[i:i+max_len])
-            continue
-            
-        # لو إضافة الكلمة الجديدة هتتجاوز الحد، نحفظ الصفحة ونبدأ صفحة جديدة
-        if len(current_page) + len(word) + 1 > max_len:
-            pages.append(current_page.strip())
-            current_page = word + " "
-        else:
-            current_page += word + " "
-            
-    # حفظ آخر صفحة متبقية
-    if current_page:
-        pages.append(current_page.strip())
+    while len(w_text) > max_len:
+        # البحث عن أقرب مسافة أو سطر جديد لقص النص بأمان
+        split_pos = w_text.rfind(' ', 0, max_len)
+        split_nl = w_text.rfind('\n', 0, max_len)
         
-    if not pages:
-        pages = [""]
+        # اختيار أفضل مكان للقص (سواء سطر أو مسافة)
+        best_split = max(split_pos, split_nl)
+        
+        if best_split <= 0:  
+            best_split = max_len # في حال كانت كلمة واحدة عملاقة بلا مسافات
+            
+        pages.append(w_text[:best_split].strip())
+        w_text = w_text[best_split:].strip()
+        
+    if w_text or not pages:
+        pages.append(w_text.strip() if w_text else "")
+        
     total_pages = len(pages)
 
     # معرف فريد للصفحة بناءً على المستخدم والهمسة
     state_key = f"{user_id}_{wid}"
     current_page_idx = user_page_state.get(state_key, 0)
     
-    # تجهيز النص مع رقم الصفحة
-    alert_text = f"{pages[current_page_idx]}\n\n * الصفحة 📄 {current_page_idx + 1} / {total_pages}"
+    # تجهيز النص وحل مشكلة الـ RTL (اختفاء يمين الشاشة) عبر تنسيق آمن 100% للغة العربية
+    alert_text = f"{pages[current_page_idx]}\n\n- الصفحة {current_page_idx + 1} من {total_pages} -"
     
     # تحديث الصفحة للضغطة القادمة
     user_page_state[state_key] = (current_page_idx + 1) % total_pages
@@ -400,18 +387,14 @@ async def read_whisper_callback(client, call):
         return
 
 
-# ================= 5. أوامر المطور (الإضافة الجديدة) ================= #
-
-# فلتر لكلمات المطور
+# ================= 5. أوامر المطور ================= #
 dev_words = filters.create(lambda _, __, message: message.text and message.text.strip() in ["المطور", "مطور", "مطور السورس", "سورس"])
 
-# أمر طلب إضافة صورة من الأدمن
 @app_bot.on_message(filters.regex(r"^/?اضف صوره$") & filters.user(ADMINS))
 async def ask_dev_image(client, message):
     admin_states[message.from_user.id] = "waiting_for_dev_image"
     await message.reply_text("↢ حسناً عزيزي المطور، أرسل لي الصورة الآن ليتم حفظها كصورة للسورس.")
 
-# استقبال الصورة من الأدمن وحفظها
 @app_bot.on_message(filters.photo & filters.user(ADMINS))
 async def receive_dev_image(client, message):
     if admin_states.get(message.from_user.id) == "waiting_for_dev_image":
@@ -420,18 +403,15 @@ async def receive_dev_image(client, message):
         del admin_states[message.from_user.id]
         await message.reply_text("↢ تم تحديث وحفظ صورة المطور بنجاح ✅.")
 
-# الرد على كلمات المطور في الجروبات أو الخاص
 @app_bot.on_message(dev_words)
 async def dev_info_trigger(client, message):
     file_id = await get_dev_image()
     caption = "• Dev Bot ↦ 𝖣ɾ 𝖤ᥣᎧᖇყ\n━━━━━━━━━━━━\n• Dev ↦  𝖣ɾ 𝖤ᥣᎧᖇყ\n• Bio ↦ الحمد لله دائمًا مطمئنًا •"
     
-    # زر الإنلاين الأزرق بنظام Raw API (Primary)
     inline_keyboard = [
         [{"text": "𝖣ɾ 𝖤ᥣᎧᖇყ", "url": "https://t.me/yeeyy", "style": "primary"}]
     ]
 
-    # إرسال الصورة إذا تم تعيينها من الأدمن باستخدام Raw API
     if file_id:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
         payload = {
@@ -444,7 +424,6 @@ async def dev_info_trigger(client, message):
             }
         }
     else:
-        # إذا لم يتم تعيين صورة، سيرسل النص فقط لتفادي المشاكل
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
         payload = {
             "chat_id": message.chat.id,
