@@ -22,6 +22,10 @@ app_bot = Client(
 
 db_lock = asyncio.Lock()
 
+# متغيرات لحفظ حالة الصفحات وإشعارات القراءة (تمت إضافتها)
+user_page_state = {}
+notified_whispers = set()
+
 # ================= دالة سريعة لإرسال الأزرار الملونة (Raw API) ================= #
 async def send_colored_keyboard(chat_id, text, inline_keyboard, reply_to_msg_id=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
@@ -281,7 +285,7 @@ async def process_whisper_text(client, message):
         pass
 
 
-# ================= 4. قراءة الهمسة (نظام الحماية) ================= #
+# ================= 4. قراءة الهمسة (نظام الحماية والصفحات) ================= #
 @app_bot.on_callback_query(filters.regex(r"^read_"))
 async def read_whisper_callback(client, call):
     wid = call.data.split("read_")[1]
@@ -296,10 +300,28 @@ async def read_whisper_callback(client, call):
     is_receiver = (user_id == whisper['receiver_id'])
     is_admin = (user_id in ADMINS)
 
+    # --- بداية التعديل: نظام الصفحات ---
     w_text = whisper['text']
-    if len(w_text) > 170:
-        w_text = w_text[:167] + "..."
-    alert_text = f"{w_text}\n * الصفحة 📄 1 / 1"
+    chunk_size = 160  # الحد الأقصى للحروف في الصفحة الواحدة عشان تناسب تنبيهات تليجرام
+    
+    # تقسيم النص إلى قائمة من الصفحات
+    pages = [w_text[i:i+chunk_size] for i in range(0, len(w_text), chunk_size)]
+    if not pages:
+        pages = [""]
+    total_pages = len(pages)
+
+    # معرف فريد للصفحة بناءً على المستخدم والهمسة (عشان المرسل والمستلم كل واحد يقدر يقلب براحته)
+    state_key = f"{user_id}_{wid}"
+    
+    # جلب الصفحة الحالية، وإذا لم تكن موجودة نعطيه 0 (يعني الصفحة الأولى)
+    current_page = user_page_state.get(state_key, 0)
+    
+    # تجهيز النص مع رقم الصفحة
+    alert_text = f"{pages[current_page]}\n\n * الصفحة 📄 {current_page + 1} / {total_pages}"
+    
+    # تحديث الصفحة للضغطة القادمة (اذا وصل للصفحة الأخيرة، % total_pages راح يصفّره ويرجعه للصفحة الأولى)
+    user_page_state[state_key] = (current_page + 1) % total_pages
+    # --- نهاية التعديل: نظام الصفحات ---
 
     # المتطفل
     if not is_sender and not is_receiver and not is_admin:
@@ -324,11 +346,15 @@ async def read_whisper_callback(client, call):
     # المستلم يقرأ
     if is_receiver:
         await call.answer(alert_text, show_alert=True)
-        try: 
-            receiver_mention = get_mention(whisper['receiver_name'], whisper['receiver_id'])
-            await client.send_message(whisper['sender_id'], f"↢ تمت قراءة الهمسة .. بنجاح \n↢ من قبل ↤ {receiver_mention}\n-", disable_web_page_preview=True)
-        except:
-            pass
+        
+        # التعديل هنا: نرسل إشعار القراءة للمرسل مرة واحدة فقط (عشان لو المستلم قلب الصفحات ما ينزعج المرسل كل شوي)
+        if wid not in notified_whispers:
+            try: 
+                receiver_mention = get_mention(whisper['receiver_name'], whisper['receiver_id'])
+                await client.send_message(whisper['sender_id'], f"↢ تمت قراءة الهمسة .. بنجاح \n↢ من قبل ↤ {receiver_mention}\n-", disable_web_page_preview=True)
+                notified_whispers.add(wid)
+            except:
+                pass
         return
 
 
