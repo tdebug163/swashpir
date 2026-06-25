@@ -2,3 +2,4 @@ flask
 Pyrogram
 tgcrypto
 aiosqlite
+aiohttp
