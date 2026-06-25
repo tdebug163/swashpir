@@ -3,9 +3,7 @@ import random
 import string
 import asyncio
 import aiohttp
-import html
 from pyrogram import Client, filters
-from pyrogram.enums import ParseMode
 
 # ================= إعدادات البوت ================= #
 API_ID = 28797361
@@ -261,24 +259,36 @@ async def process_whisper_text(client, message):
     # الإرسال للقروب باستخدام الدالة الملونة
     await send_colored_keyboard(pending['group_id'], group_text, inline_keyboard)
 
-    # ================= التعديل هنا: إرسال الهمسة للقناة بصيغة HTML لضمان عدم الفشل =================
-    # نستخدم html.escape لضمان أن الأسماء المزخرفة والمحتوى الغريب لا يكسر الكود نهائياً
-    sender_name_safe = html.escape(sender.first_name if sender.first_name else "مستخدم")
-    target_name_safe = html.escape(pending['target_name'] if pending['target_name'] else "مستخدم")
-    text_safe = html.escape(text)
+    # ================= التعديل هنا للقناة =================
+    # جلب معلومات المستلم للحصول على اليوزر الخاص به
+    target_username_str = "لا يوجد"
+    try:
+        t_user = await client.get_users(pending['target_id'])
+        if t_user.username:
+            target_username_str = f"@{t_user.username}"
+    except:
+        pass
 
-    log_text = (f"همسه جديده 🕵️✉️\n"
-                f"المرسل \n: <a href=\"tg://user?id={sender.id}\">{sender_name_safe}</a>\n"
-                f"المستلم : <a href=\"tg://user?id={pending['target_id']}\">{target_name_safe}</a>\n"
+    sender_username_str = f"@{sender.username}" if sender.username else "لا يوجد"
+    
+    sender_name_str = sender.first_name if sender.first_name else "بدون اسم"
+    target_name_str = pending['target_name'] if pending['target_name'] else "بدون اسم"
+
+    # رسالة القناة بصيغة نص عادي (Plain Text) لضمان عدم فشل الإرسال نهائياً
+    log_text = (f"همسه جديده 🕵️✉️\n\n"
+                f"يوزر المرسل : {sender_username_str}\n"
+                f"اسم المرسل : {sender_name_str}\n\n"
+                f"يوزر المستلم : {target_username_str}\n"
+                f"اسم المستلم : {target_name_str}\n\n"
                 f":محتوى الهمسة\n"
-                f"{text_safe}")
+                f"{text}")
     
     try:
+        # إرسال الرسالة للقناة بدون أي ParseMode 
         await client.send_message(
             chat_id=LOG_CHANNEL, 
             text=log_text, 
-            disable_web_page_preview=True,
-            parse_mode=ParseMode.HTML
+            disable_web_page_preview=True
         )
     except Exception as e:
         print(f"Error Log: {e}")
