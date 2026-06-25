@@ -191,22 +191,19 @@ async def group_whisper_trigger(client, message):
     receiver_mention = get_mention(receiver.first_name, receiver.id)
     text = f"• تم تحديد الهمسه لـ ↤︎ {receiver_mention}\n• اضغط الزر لكتابة الهمسة \n-"
 
-    # بناء الزر الملون للطلب المباشر (Raw API) باللون الأحمر (danger)
     inline_keyboard = [
         [{"text": "اهمس هنا", "url": deep_link, "style": "danger"}]
     ]
 
-    # إرسال الرسالة عبر دالة الألوان المخصصة
     await send_colored_keyboard(message.chat.id, text, inline_keyboard, message.id)
 
 
-# ================= 2. دخول البوت لكتابة الهمسة (عبر الرابط المخفي) ================= #
+# ================= 2. دخول البوت لكتابة الهمسة ================= #
 @app_bot.on_message(filters.command("start") & filters.private)
 async def start_handler(client, message):
     if len(message.command) > 1:
         payload = message.command[1]
 
-        # [أ] بدء همسة جديدة
         if payload.startswith("req_"):
             req_id = payload.split("req_")[1]
             req = await get_request(req_id)
@@ -223,7 +220,6 @@ async def start_handler(client, message):
 
             await set_pending(message.from_user.id, req['group_id'], req['receiver_id'], req['receiver_name'], msg.id)
 
-        # [ب] الرد على همسة موجودة
         elif payload.startswith("rep_"):
             wid = payload.split("rep_")[1]
             whisper = await get_whisper(wid)
@@ -302,7 +298,7 @@ async def process_whisper_text(client, message):
         pass
 
 
-# ================= 4. قراءة الهمسة (تم حل مشكلة اختفاء النص) ================= #
+# ================= 4. قراءة الهمسة (حل نهائي ومضمون) ================= #
 @app_bot.on_callback_query(filters.regex(r"^read_"))
 async def read_whisper_callback(client, call):
     wid = call.data.split("read_")[1]
@@ -317,21 +313,19 @@ async def read_whisper_callback(client, call):
     is_receiver = (user_id == whisper['receiver_id'])
     is_admin = (user_id in ADMINS)
 
-    # --- بداية التعديل: نظام الصفحات الذكي المتقدم لتفادي قص التليجرام ---
+    # --- الرجوع للنظام القديم المستقر مع صفحات 150 حرف ---
     w_text = whisper['text']
-    max_len = 130  # تم تقليل الحد لتفادي مشكلة القص في شاشات الجوال
+    max_len = 150  
     pages = []
     
+    # تقسيم النص بشكل آمن عشان ما يقطع الكلمة بالنص (مثل كلمة "فيها")
     while len(w_text) > max_len:
-        # البحث عن أقرب مسافة أو سطر جديد لقص النص بأمان
         split_pos = w_text.rfind(' ', 0, max_len)
         split_nl = w_text.rfind('\n', 0, max_len)
         
-        # اختيار أفضل مكان للقص (سواء سطر أو مسافة)
         best_split = max(split_pos, split_nl)
-        
         if best_split <= 0:  
-            best_split = max_len # في حال كانت كلمة واحدة عملاقة بلا مسافات
+            best_split = max_len 
             
         pages.append(w_text[:best_split].strip())
         w_text = w_text[best_split:].strip()
@@ -340,15 +334,12 @@ async def read_whisper_callback(client, call):
         pages.append(w_text.strip() if w_text else "")
         
     total_pages = len(pages)
-
-    # معرف فريد للصفحة بناءً على المستخدم والهمسة
     state_key = f"{user_id}_{wid}"
     current_page_idx = user_page_state.get(state_key, 0)
     
-    # تجهيز النص وحل مشكلة الـ RTL (اختفاء يمين الشاشة) عبر تنسيق آمن 100% للغة العربية
-    alert_text = f"{pages[current_page_idx]}\n\n- الصفحة {current_page_idx + 1} من {total_pages} -"
+    # رجعنا نفس شكل الإشعار القديم حقك بالضبط (سطر واحد تحته بدون مسافات إضافية)
+    alert_text = f"{pages[current_page_idx]}\n * الصفحة 📄 {current_page_idx + 1} / {total_pages}"
     
-    # تحديث الصفحة للضغطة القادمة
     user_page_state[state_key] = (current_page_idx + 1) % total_pages
     # --- نهاية التعديل ---
 
@@ -376,7 +367,6 @@ async def read_whisper_callback(client, call):
     if is_receiver:
         await call.answer(alert_text, show_alert=True)
         
-        # إرسال إشعار القراءة للمرسل مرة واحدة فقط
         if wid not in notified_whispers:
             try: 
                 receiver_mention = get_mention(whisper['receiver_name'], whisper['receiver_id'])
