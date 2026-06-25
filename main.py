@@ -22,9 +22,10 @@ app_bot = Client(
 
 db_lock = asyncio.Lock()
 
-# متغيرات لحفظ حالة الصفحات وإشعارات القراءة 
+# متغيرات لحفظ حالة الصفحات وإشعارات القراءة وحالة الأدمن
 user_page_state = {}
 notified_whispers = set()
+admin_states = {} # تم إضافتها لحفظ حالة الأدمن عند طلب صورة المطور
 
 # ================= دالة سريعة لإرسال الأزرار الملونة (Raw API) ================= #
 async def send_colored_keyboard(chat_id, text, inline_keyboard, reply_to_msg_id=None):
@@ -55,6 +56,9 @@ def init_db():
                  (user_id INTEGER PRIMARY KEY, group_id INTEGER, target_id INTEGER, target_name TEXT, prompt_msg_id INTEGER)''')
     c.execute('''CREATE TABLE IF NOT EXISTS whispers 
                  (wid TEXT PRIMARY KEY, group_id INTEGER, sender_id INTEGER, receiver_id INTEGER, text TEXT, sender_name TEXT, receiver_name TEXT)''')
+    # إضافة جدول جديد لحفظ إعدادات البوت مثل صورة المطور
+    c.execute('''CREATE TABLE IF NOT EXISTS settings 
+                 (key TEXT PRIMARY KEY, value TEXT)''')
     conn.commit()
     conn.close()
 
@@ -146,6 +150,26 @@ async def get_whisper(wid):
         return {"wid": res[0], "group_id": res[1], "sender_id": res[2], "receiver_id": res[3], "text": res[4], "sender_name": res[5], "receiver_name": res[6]}
     return None
 
+# ================= دوال التحكم بصورة المطور ================= #
+async def set_dev_image(file_id):
+    async with db_lock:
+        conn = sqlite3.connect('whispers.db')
+        c = conn.cursor()
+        c.execute("REPLACE INTO settings VALUES (?, ?)", ("dev_image", file_id))
+        conn.commit()
+        conn.close()
+
+async def get_dev_image():
+    async with db_lock:
+        conn = sqlite3.connect('whispers.db')
+        c = conn.cursor()
+        c.execute("SELECT value FROM settings WHERE key=?", ("dev_image",))
+        res = c.fetchone()
+        conn.close()
+    if res:
+        return res[0]
+    return None
+
 
 # ================= 1. استدعاء الهمسة في القروب ================= #
 async def whisper_filter(_, __, message):
@@ -218,7 +242,7 @@ async def start_handler(client, message):
 
 
 # ================= 3. استلام نص الهمسة وإرسالها ================= #
-@app_bot.on_message(filters.private & filters.text & ~filters.command("start"))
+@app_bot.on_message(filters.private & filters.text & ~filters.command("start") & ~filters.regex(r"^/?اضف صوره"))
 async def process_whisper_text(client, message):
     pending = await get_pending(message.from_user.id)
     if not pending:
@@ -374,6 +398,68 @@ async def read_whisper_callback(client, call):
             except:
                 pass
         return
+
+
+# ================= 5. أوامر المطور (الإضافة الجديدة) ================= #
+
+# فلتر لكلمات المطور
+dev_words = filters.create(lambda _, __, message: message.text and message.text.strip() in ["المطور", "مطور", "مطور السورس", "سورس"])
+
+# أمر طلب إضافة صورة من الأدمن
+@app_bot.on_message(filters.regex(r"^/?اضف صوره$") & filters.user(ADMINS))
+async def ask_dev_image(client, message):
+    admin_states[message.from_user.id] = "waiting_for_dev_image"
+    await message.reply_text("↢ حسناً عزيزي المطور، أرسل لي الصورة الآن ليتم حفظها كصورة للسورس.")
+
+# استقبال الصورة من الأدمن وحفظها
+@app_bot.on_message(filters.photo & filters.user(ADMINS))
+async def receive_dev_image(client, message):
+    if admin_states.get(message.from_user.id) == "waiting_for_dev_image":
+        file_id = message.photo.file_id
+        await set_dev_image(file_id)
+        del admin_states[message.from_user.id]
+        await message.reply_text("↢ تم تحديث وحفظ صورة المطور بنجاح ✅.")
+
+# الرد على كلمات المطور في الجروبات أو الخاص
+@app_bot.on_message(dev_words)
+async def dev_info_trigger(client, message):
+    file_id = await get_dev_image()
+    caption = "• Dev Bot ↦ 𝖣ɾ 𝖤ᥣᎧᖇყ\n━━━━━━━━━━━━\n• Dev ↦  𝖣ɾ 𝖤ᥣᎧᖇყ\n• Bio ↦ الحمد لله دائمًا مطمئنًا •"
+    
+    # زر الإنلاين الأزرق بنظام Raw API (Primary)
+    inline_keyboard = [
+        [{"text": "𝖣ɾ 𝖤ᥣᎧᖇყ", "url": "https://t.me/yeeyy", "style": "primary"}]
+    ]
+
+    # إرسال الصورة إذا تم تعيينها من الأدمن باستخدام Raw API
+    if file_id:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
+        payload = {
+            "chat_id": message.chat.id,
+            "photo": file_id,
+            "caption": caption,
+            "reply_to_message_id": message.id,
+            "reply_markup": {
+                "inline_keyboard": inline_keyboard
+            }
+        }
+    else:
+        # إذا لم يتم تعيين صورة، سيرسل النص فقط لتفادي المشاكل
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": message.chat.id,
+            "text": caption,
+            "reply_to_message_id": message.id,
+            "reply_markup": {
+                "inline_keyboard": inline_keyboard
+            }
+        }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            await session.post(url, json=payload)
+    except Exception as e:
+        pass
 
 
 # ================= التشغيل ================= #
