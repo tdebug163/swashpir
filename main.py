@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import random
 import string
@@ -8,7 +9,7 @@ from pyrogram import Client, filters
 # ================= إعدادات البوت ================= #
 API_ID = 28797361
 API_HASH = "771041b32e83ab232e066b7adeee700b"
-BOT_TOKEN = "8929101359:AAHA4pDryGlKK2-uV_vgG7lSnae27P21usA"
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 ADMINS = [729501226, 936283959, 445421092]
 LOG_CHANNEL = -1003840202910
